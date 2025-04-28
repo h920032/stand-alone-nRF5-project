@@ -395,6 +395,21 @@ def main(project_file_path, output_dir, makefile_dir=None): # Add makefile_dir p
             shutil.copy2(original_makefile_path, dest_makefile_path)
             print(f"  Copied Makefile from '{original_makefile_path}' to: {dest_makefile_path}")
 
+            # --- Copy Linker Script (.ld file) ---
+            linker_script_copied = False
+            for item in os.listdir(original_makefile_base_dir):
+                if item.endswith(".ld"):
+                    original_linker_script_path = os.path.join(original_makefile_base_dir, item)
+                    dest_linker_script_path = os.path.join(output_dir, item)
+                    if os.path.isfile(original_linker_script_path):
+                        shutil.copy2(original_linker_script_path, dest_linker_script_path)
+                        print(f"  Copied Linker Script from '{original_linker_script_path}' to: {dest_linker_script_path}")
+                        linker_script_copied = True
+                        break # Assume only one relevant .ld file
+            if not linker_script_copied:
+                print(f"  Warning: No linker script (.ld file) found in '{original_makefile_base_dir}'.")
+            # --- End Linker Script Copy ---
+
             # Read the copied Makefile content
             with open(dest_makefile_path, 'r', encoding='utf-8') as f:
                 makefile_lines = f.readlines()
@@ -402,11 +417,13 @@ def main(project_file_path, output_dir, makefile_dir=None): # Add makefile_dir p
             modified_makefile_lines = []
             sdk_root_updated = False
             proj_dir_defined = False
+            cflags_inserted = False # Flag to track CFLAGS insertion
 
             # Define the new PROJ_DIR and SDK_ROOT lines
             new_proj_dir_line = 'PROJ_DIR := ./\n'
             new_sdk_root_definition = f'SDK_ROOT := $(PROJ_DIR)/{SDK_FILES_SUBDIR}\n'
             original_sdk_root_pattern = r'^SDK_ROOT\s*:=\s*\.\./\.\./\.\./\.\./\.\./\.\.'
+            target_cflags_line = 'CFLAGS += -fno-builtin -fshort-enums' # Line to insert after
 
             for line in makefile_lines:
                 # Check if the line defines SDK_ROOT
@@ -425,6 +442,13 @@ def main(project_file_path, output_dir, makefile_dir=None): # Add makefile_dir p
                     # Keep the original line
                     modified_makefile_lines.append(line)
 
+                # Check if this is the line to insert CFLAGS after
+                if line.strip() == target_cflags_line:
+                    modified_makefile_lines.append('CFLAGS += -Wall -Werror\n')
+                    modified_makefile_lines.append('CFLAGS += -Wno-array-bounds\n')
+                    cflags_inserted = True
+                    print(f"  Inserted additional CFLAGS after '{target_cflags_line}'.")
+
             # If SDK_ROOT wasn't found/updated, add PROJ_DIR and SDK_ROOT at the beginning (or a suitable place)
             if not sdk_root_updated:
                  print(f"  Warning: Original SDK_ROOT pattern not found. Adding PROJ_DIR and new SDK_ROOT definition near the top.")
@@ -439,6 +463,9 @@ def main(project_file_path, output_dir, makefile_dir=None): # Add makefile_dir p
                      proj_dir_defined = True
                  modified_makefile_lines.insert(insert_pos + 1, new_sdk_root_definition)
 
+            # Report if CFLAGS insertion failed
+            if not cflags_inserted:
+                print(f"  Warning: Target line '{target_cflags_line}' not found. Additional CFLAGS were not inserted.")
 
             modified_makefile_content = "".join(modified_makefile_lines)
 
@@ -466,6 +493,29 @@ def main(project_file_path, output_dir, makefile_dir=None): # Add makefile_dir p
             )
             if num_config_file_subs > 0:
                 print(f"  Updated {num_config_file_subs} config file path(s) in Makefile.")
+
+            # Replace '../config \' with '$(PROJ_DIR)/config \'
+            original_config_dir_pattern = r'\.\./config \\\n' # Match '../config \' at the end of a line
+            new_config_dir = r'$(PROJ_DIR)/config \\\n' # Use PROJ_DIR
+            modified_makefile_content, num_config_dir_subs = re.subn(
+                original_config_dir_pattern,
+                new_config_dir,
+                modified_makefile_content
+            )
+            if num_config_dir_subs > 0:
+                print(f"  Updated {num_config_dir_subs} '../config \\' path(s) in Makefile.")
+
+            # --- Add step to replace "$(PROJ_DIR)/main.c " with "$(SDK_ROOT)/main.c " ---
+            original_main_c_pattern = r'\$\(PROJ_DIR\)/main\.c '
+            new_main_c_path = r'$(SDK_ROOT)/main.c '
+            modified_makefile_content, num_main_c_subs = re.subn(
+                original_main_c_pattern,
+                new_main_c_path,
+                modified_makefile_content
+            )
+            if num_main_c_subs > 0:
+                print(f"  Updated {num_main_c_subs} 'main.c' path(s) in Makefile.")
+
             # --- End of other modifications ---
 
             # Write the modified content back
@@ -477,6 +527,32 @@ def main(project_file_path, output_dir, makefile_dir=None): # Add makefile_dir p
             print(f"Error processing Makefile {original_makefile_path}: {e}")
     else:
         print(f"Warning: Makefile not found at {original_makefile_path}. Skipping Makefile processing.")
+
+    # --- Modify Makefile ---
+    print("Modifying Makefile...")
+    makefile_path = os.path.join(output_dir, 'Makefile')
+
+    if os.path.isfile(makefile_path):
+        try:
+            with open(makefile_path, 'r', encoding='utf-8') as f:
+                makefile_lines = f.readlines()
+
+            modified_makefile_lines = []
+            for line in makefile_lines:
+                # Remove the line defining PROJ_DIR
+                if line.strip().startswith('PROJ_DIR := ../../..'):
+                    print(f"  Removed line defining PROJ_DIR: {line.strip()}")
+                    continue  # Skip adding this line to the modified content
+                modified_makefile_lines.append(line)
+
+            # Write the modified content back
+            with open(makefile_path, 'w', encoding='utf-8') as f:
+                f.writelines(modified_makefile_lines)
+
+            print("Successfully removed PROJ_DIR definition from Makefile.")
+
+        except Exception as e:
+            print(f"Error modifying Makefile: {e}")
 
     # --- Modify Makefile.posix ---
     print("Modifying Makefile.posix...")
