@@ -1,4 +1,4 @@
-# Standalone Segger Embedded Studio Project Creator
+# Standalone nRF5 Project Creator
 
 This Python script (`create_standalone_project.py`) converts a Segger Embedded Studio (`.emProject`) project that relies on the nRF5 SDK into a self-contained, standalone project. It copies all necessary SDK source files, header files, Makefiles, and configuration files into a specified output directory and updates the project file and Makefiles to use these local copies.
 
