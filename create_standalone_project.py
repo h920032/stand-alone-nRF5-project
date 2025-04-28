@@ -443,7 +443,8 @@ def main(project_file_path, output_dir, makefile_dir=None): # Add makefile_dir p
             modified_makefile_content = "".join(modified_makefile_lines)
 
             # --- Apply other Makefile modifications (config paths) ---
-            # Example: Replace '-I../config' with '-I$(PROJ_DIR)/config'
+            # Ensure config paths use PROJ_DIR relative to the Makefile location
+            # Replace '-I../config' with '-I$(PROJ_DIR)/config'
             original_config_include_pattern = r'(-I)\.\./config'
             new_config_include = r'\1$(PROJ_DIR)/config' # Use PROJ_DIR
             modified_makefile_content, num_config_inc_subs = re.subn(
@@ -454,8 +455,9 @@ def main(project_file_path, output_dir, makefile_dir=None): # Add makefile_dir p
             if num_config_inc_subs > 0:
                 print(f"  Updated {num_config_inc_subs} config include path(s) in Makefile.")
 
-            # Example: Replace '../config/sdk_config.h' with '$(PROJ_DIR)/config/sdk_config.h'
-            original_config_file_pattern = r'\.\./config/(sdk_config\.h)' # Be specific or broader as needed
+            # Replace '../config/sdk_config.h' with '$(PROJ_DIR)/config/sdk_config.h'
+            # Make the pattern more general for any file within ../config/
+            original_config_file_pattern = r'\.\./config/([^\s]+)' # Match ../config/ followed by non-whitespace chars
             new_config_file = r'$(PROJ_DIR)/config/\1' # Use PROJ_DIR
             modified_makefile_content, num_config_file_subs = re.subn(
                 original_config_file_pattern,
@@ -475,6 +477,39 @@ def main(project_file_path, output_dir, makefile_dir=None): # Add makefile_dir p
             print(f"Error processing Makefile {original_makefile_path}: {e}")
     else:
         print(f"Warning: Makefile not found at {original_makefile_path}. Skipping Makefile processing.")
+
+    # --- Modify Makefile.posix ---
+    print("Modifying Makefile.posix...")
+    # Construct the expected path within the output directory
+    makefile_posix_rel_path = os.path.join(SDK_FILES_SUBDIR, 'components', 'toolchain', 'gcc', 'Makefile.posix')
+    makefile_posix_abs_path = os.path.join(output_dir, makefile_posix_rel_path)
+
+    if os.path.isfile(makefile_posix_abs_path):
+        try:
+            with open(makefile_posix_abs_path, 'r', encoding='utf-8') as f:
+                posix_content = f.read()
+
+            original_gcc_path = "/usr/local/gcc-arm-none-eabi-9-2020-q2-update/bin/"
+            new_gcc_path = "/usr/local/bin/" # Only replace the directory part
+
+            modified_posix_content = posix_content.replace(original_gcc_path, new_gcc_path)
+
+            if modified_posix_content != posix_content:
+                with open(makefile_posix_abs_path, 'w', encoding='utf-8') as f:
+                    f.write(modified_posix_content)
+                print(f"  Updated GNU toolchain path in: {makefile_posix_abs_path}")
+            else:
+                print(f"  GNU toolchain path already correct or not found in: {makefile_posix_abs_path}")
+
+        except Exception as e:
+            print(f"Error processing Makefile.posix {makefile_posix_abs_path}: {e}")
+    else:
+        print(f"Warning: Makefile.posix not found at {makefile_posix_abs_path}. Skipping modification.")
+        # Check if Makefile.common exists as a fallback check
+        makefile_common_check_path = os.path.join(output_dir, SDK_FILES_SUBDIR, 'components', 'toolchain', 'gcc', 'Makefile.common')
+        if not os.path.isfile(makefile_common_check_path):
+             print(f"  Also note: Makefile.common not found at expected location. Toolchain files might be missing.")
+
 
     print("Standalone project creation process finished.")
     print(f"Output located at: {os.path.abspath(output_dir)}")
